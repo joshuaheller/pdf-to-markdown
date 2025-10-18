@@ -75,8 +75,12 @@ python count_tokens.py
 - Ensure that the OpenAI API key and other environment variables are correctly set in the `.env` file.
 - The scripts assume that the input and output directories exist or will be created if they do not.
 - The `clean_markdown.py` script uses a system prompt to ensure that the Markdown files are cleaned according to specific rules without altering the content's meaning.
+- The project is optimized for GPT-4.1 with a 1M token context window:
+  - Maximum chunk size is set to 80,000 tokens for optimal balance between context quality and processing efficiency
+  - Large documents are automatically split into manageable chunks when necessary
 - Ensure that the `tiktoken` library is installed and available in your environment.
 - The script assumes that the `markdown_output` directory exists and contains Markdown files to process.
+- OpenAI library version 1.54.0+ is required for compatibility with current httpx versions.
 
 ## License
 

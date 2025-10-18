@@ -15,8 +15,9 @@ except ImportError:
 # Load environment variables
 load_dotenv()
 
-# Reduce max tokens to account for system prompt and response
-MAX_TOKENS = 8000  # This leaves room for system prompt and response of similar length
+# Max tokens per chunk for GPT-4.1 (1M token context window)
+# Sweet spot: large enough for coherent context, small enough for quality. Output Token windows is 32768 tokens.
+MAX_TOKENS = 20000
 
 SYSTEM_PROMPT = """Du bist ein Experte für Markdown und Daten. Deine Aufgabe ist es, Markdown-Dateien zu bereinigen und umzustrukturieren und dabei diese strengen Regeln zu befolgen:
 
