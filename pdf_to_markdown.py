@@ -41,7 +41,7 @@ def convert_pdf_to_markdown(pdf_path: str, output_dir: str) -> None:
 
 def main():
     # Define input and output directories
-    data_dir = "data"
+    data_dir = "data/original"
     output_dir = "markdown_output"
     
     # Process all PDFs in the data directory
