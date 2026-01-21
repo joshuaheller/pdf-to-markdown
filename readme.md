@@ -22,12 +22,27 @@ This project involves processing PDF files to convert them into Markdown format 
 
 ## Environment Setup
 
-Ensure you have a `.env` file in the root directory with the following environment variables:
+Ensure you have a `.env` file in the root directory (you can copy from `.env.template`) with the following environment variables.
+
+### LLM provider selection
+
+- `LLM_PROVIDER`: Selects which backend to use for cleaning markdown.
+  - `openai` (default)
+  - `azure`
+
+### OpenAI configuration (LLM_PROVIDER=openai)
 
 - `OPENAI_API_KEY`: Your OpenAI API key.
 - `OPENAI_MODEL`: The model to use for the OpenAI API.
 - `OPENAI_TEMPERATURE`: (Optional) The temperature setting for the OpenAI API.
 - `OPENAI_MAX_TOKENS`: (Optional) The maximum number of tokens for the OpenAI API.
+
+### Azure OpenAI configuration (LLM_PROVIDER=azure)
+
+- `AZURE_OPENAI_API_KEY`: Your Azure OpenAI API key.
+- `AZURE_OPENAI_ENDPOINT`: The Azure OpenAI endpoint, e.g. `https://your-resource-name.openai.azure.com/`.
+- `AZURE_OPENAI_API_VERSION`: The API version to use, e.g. `2024-02-15-preview`.
+- `AZURE_OPENAI_DEPLOYMENT`: The Azure OpenAI deployment name to use as the model.
 
 ## Scripts and Commands
 
@@ -56,6 +71,25 @@ python clean_markdown.py --input <input_path> --output <output_dir>
 
 - **Input Path**: Path to a single Markdown file or a directory containing Markdown files.
 - **Output Directory**: Directory where cleaned Markdown files will be saved.
+- **Parallel processing (directory input only)**:
+  - Default is sequential (`--workers 1`).
+  - Use multiple workers (process pool) to clean files concurrently:
+
+    ```bash
+    python clean_markdown.py --input markdown_output --output data/markdown_cleaned --workers 4
+    ```
+
+  - Automatically set one worker per file:
+
+    ```bash
+    python clean_markdown.py --input markdown_output --output data/markdown_cleaned --auto-workers
+    ```
+
+  - Switch to threads instead of processes if desired:
+
+    ```bash
+    python clean_markdown.py --input markdown_output --output data/markdown_cleaned --workers 4 --executor thread
+    ```
 
 ### 3. Count Tokens in Markdown Files
 
@@ -75,7 +109,7 @@ python count_tokens.py
 - Ensure that the OpenAI API key and other environment variables are correctly set in the `.env` file.
 - The scripts assume that the input and output directories exist or will be created if they do not.
 - The `clean_markdown.py` script uses a system prompt to ensure that the Markdown files are cleaned according to specific rules without altering the content's meaning.
-- The project is optimized for GPT-4.1 with a 1M token context window:
+- The project is optimized for `gpt-5-mini` with a ~400,000 token context window and up to ~128,000 output tokens:
   - Maximum chunk size is set to 80,000 tokens for optimal balance between context quality and processing efficiency
   - Large documents are automatically split into manageable chunks when necessary
 - Ensure that the `tiktoken` library is installed and available in your environment.
