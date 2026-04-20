@@ -1,7 +1,12 @@
 import os
 import sys
+from concurrent.futures import (
+    ProcessPoolExecutor,
+    ThreadPoolExecutor,
+    as_completed,
+)
 from pathlib import Path
-from openai import OpenAI
+from openai import OpenAI, AzureOpenAI
 import argparse
 from typing import Optional, List
 import tiktoken
@@ -15,8 +20,10 @@ except ImportError:
 # Load environment variables
 load_dotenv()
 
-# Max tokens per chunk for GPT-4.1 (1M token context window)
-# Sweet spot: large enough for coherent context, small enough for quality. Output Token windows is 32768 tokens.
+# Max tokens per chunk for gpt-5-mini.
+# Context window: ~400,000 tokens, max output: ~128,000 tokens.
+# We keep chunks well below the context limit to leave plenty of room for
+# the system prompt, any surrounding context, and the model's output.
 MAX_TOKENS = 20000
 
 SYSTEM_PROMPT = """Du bist ein Experte für Markdown und Daten. Deine Aufgabe ist es, Markdown-Dateien zu bereinigen und umzustrukturieren und dabei diese strengen Regeln zu befolgen:
@@ -35,7 +42,7 @@ Gebe nur den bereinigten Markdown-Inhalt ohne Erklärungen oder Kommentare aus."
 
 def count_tokens(text: str) -> int:
     """Count tokens in a text using tiktoken."""
-    encoding = tiktoken.encoding_for_model("gpt-4")
+    encoding = tiktoken.encoding_for_model("gpt-5-mini")
     return len(encoding.encode(text))
 
 def split_into_chunks(content: str) -> List[str]:
@@ -121,19 +128,44 @@ def get_env_var(name: str, default: Optional[str] = None) -> str:
         raise ValueError(f"Environment variable {name} is not set")
     return value
 
+
+def get_llm_client_and_model():
+    """Return the configured LLM client and model/deployment name.
+
+    Provider is selected via the LLM_PROVIDER environment variable:
+    - "openai" (default): uses OPENAI_* variables
+    - "azure": uses AZURE_OPENAI_* variables
+    """
+    provider = os.getenv("LLM_PROVIDER", "openai").lower()
+
+    if provider == "azure":
+        client = AzureOpenAI(
+            api_key=get_env_var("AZURE_OPENAI_API_KEY"),
+            azure_endpoint=get_env_var("AZURE_OPENAI_ENDPOINT"),
+            api_version=get_env_var("AZURE_OPENAI_API_VERSION"),
+        )
+        model = get_env_var("AZURE_OPENAI_DEPLOYMENT")
+        return client, model
+
+    if provider == "openai":
+        client = OpenAI(api_key=get_env_var("OPENAI_API_KEY"))
+        model = get_env_var("OPENAI_MODEL")
+        return client, model
+
+    raise ValueError(f"Unsupported LLM_PROVIDER: {provider}")
+
 def clean_markdown_with_openai(content: str) -> str:
     """Clean up markdown content using OpenAI API."""
-    client = OpenAI(api_key=get_env_var("OPENAI_API_KEY"))
+    client, model = get_llm_client_and_model()
     
     try:
         response = client.chat.completions.create(
-            model=get_env_var("OPENAI_MODEL"),
+            model=model,
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": content}
             ],
-            temperature=float(get_env_var("OPENAI_TEMPERATURE", "0.1")),
-            max_tokens=None if get_env_var("OPENAI_MAX_TOKENS", "None") == "None" else int(get_env_var("OPENAI_MAX_TOKENS"))
+            reasoning_effort="low",
         )
         cleaned_content = response.choices[0].message.content
         if cleaned_content is None:
@@ -179,21 +211,92 @@ def process_file(input_path: str, output_dir: str) -> None:
         f.write(cleaned_content)
     print(f"Saved cleaned file to {output_path}")
 
+def process_directory(input_dir: str, output_dir: str, workers: int, executor_choice: str) -> None:
+    """Process all markdown files in a directory, optionally in parallel."""
+    os.makedirs(output_dir, exist_ok=True)
+    md_files = sorted(
+        path for path in Path(input_dir).iterdir()
+        if path.is_file() and path.suffix == '.md'
+    )
+
+    if not md_files:
+        print(f"No markdown files found in {input_dir}")
+        return
+
+    total_files = len(md_files)
+
+    if workers <= 1:
+        for index, path in enumerate(md_files, 1):
+            print(f"[{index}/{total_files}] Processing {path.name}")
+            process_file(str(path), output_dir)
+        return
+
+    executor_cls = ProcessPoolExecutor if executor_choice == "process" else ThreadPoolExecutor
+    print(f"Processing {total_files} files with {workers} {executor_choice} workers...")
+
+    errors = []
+    with executor_cls(max_workers=workers) as executor:
+        future_to_path = {
+            executor.submit(process_file, str(path), output_dir): path
+            for path in md_files
+        }
+
+        for completed, future in enumerate(as_completed(future_to_path), 1):
+            path = future_to_path[future]
+            try:
+                future.result()
+                print(f"[{completed}/{total_files}] Finished {path.name}")
+            except Exception as exc:
+                errors.append((path, exc))
+                print(f"[{completed}/{total_files}] Error processing {path.name}: {exc}", file=sys.stderr)
+
+    if errors:
+        print("Completed with errors:", file=sys.stderr)
+        for path, exc in errors:
+            print(f"- {path.name}: {exc}", file=sys.stderr)
+    else:
+        print("All files processed successfully.")
+
 def main():
     parser = argparse.ArgumentParser(description='Clean up markdown files using OpenAI API')
     parser.add_argument('--input', '-i', required=True, help='Input markdown file or directory')
     parser.add_argument('--output', '-o', required=True, help='Output directory')
+    parser.add_argument(
+        '--workers',
+        type=int,
+        default=1,
+        help='Number of workers for directory processing. Use 1 for sequential.',
+    )
+    parser.add_argument(
+        '--auto-workers',
+        action='store_true',
+        help='Automatically set workers to match file count (one worker per file).',
+    )
+    parser.add_argument(
+        '--executor',
+        choices=['process', 'thread'],
+        default='process',
+        help='Executor type when using multiple workers (default: process).',
+    )
     args = parser.parse_args()
+
+    if args.workers < 1:
+        parser.error("--workers must be at least 1")
     
     if os.path.isfile(args.input):
         # Process single file
         process_file(args.input, args.output)
     else:
-        # Process directory
-        for file in os.listdir(args.input):
-            if file.endswith('.md'):
-                input_path = os.path.join(args.input, file)
-                process_file(input_path, args.output)
+        workers = args.workers
+        if args.auto_workers:
+            md_files = [
+                p for p in Path(args.input).iterdir()
+                if p.is_file() and p.suffix == '.md'
+            ]
+            workers = len(md_files) if md_files else 1
+            print(f"Auto-workers: found {workers} markdown files")
+        
+        process_directory(args.input, args.output, workers, args.executor)
 
 if __name__ == "__main__":
     main() 

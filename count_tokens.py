@@ -8,7 +8,7 @@ def count_tokens(text: str, model: str = "gpt-4") -> int:
     return len(encoding.encode(text))
 
 def main():
-    markdown_dir = "markdown_output"
+    markdown_dir = "data/markdown_parsed"
     total_tokens = 0
     
     # Process each markdown file
