@@ -101,3 +101,13 @@ venv/
 ENV/
 env.bak/
 venv.bak/
+
+# Data folders - track directories but not their contents
+data/markdown_cleaned/*
+!data/markdown_cleaned/.gitkeep
+data/markdown_parsed/*
+!data/markdown_parsed/.gitkeep
+data/original/*
+!data/original/.gitkeep
+markdown_output/*
+!markdown_output/.gitkeep
